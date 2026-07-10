@@ -1,0 +1,6 @@
+{
+  "name": "CareerPilot AI",
+  "description": "Build, optimize, and track your resumes and job applications with tailored cover letters and interactive AI career coaching grounded in your data.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
