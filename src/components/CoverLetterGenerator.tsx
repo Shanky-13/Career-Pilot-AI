@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
 import {
   Clipboard,
@@ -9,7 +9,10 @@ import {
   RefreshCw,
   Edit2,
   CheckCircle2,
-  Briefcase
+  Briefcase,
+  Bold,
+  Italic,
+  List
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { Resume, JobApplication } from '../types';
@@ -37,6 +40,55 @@ export default function CoverLetterGenerator({
   const [generatedLetter, setGeneratedLetter] = useState('');
   const [letterTitle, setLetterTitle] = useState('My Cover Letter');
   const [saveSuccess, setSaveSuccess] = useState(false);
+
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const handleFormat = (type: 'bold' | 'italic' | 'bullet') => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const text = generatedLetter;
+    const selectedText = text.substring(start, end);
+
+    let formatted = '';
+
+    if (type === 'bold') {
+      formatted = `**${selectedText || 'bold text'}**`;
+    } else if (type === 'italic') {
+      formatted = `*${selectedText || 'italic text'}*`;
+    } else if (type === 'bullet') {
+      if (selectedText) {
+        formatted = selectedText
+          .split('\n')
+          .map(line => line.startsWith('- ') ? line : `- ${line}`)
+          .join('\n');
+      } else {
+        formatted = '\n- ';
+      }
+    }
+
+    const newValue = text.substring(0, start) + formatted + text.substring(end);
+    setGeneratedLetter(newValue);
+
+    // Restore focus and update selection range
+    setTimeout(() => {
+      textarea.focus();
+      const newEnd = start + formatted.length;
+      if (selectedText) {
+        textarea.setSelectionRange(start, newEnd);
+      } else {
+        if (type === 'bold') {
+          textarea.setSelectionRange(start + 2, start + 11); // selects 'bold text'
+        } else if (type === 'italic') {
+          textarea.setSelectionRange(start + 1, start + 12); // selects 'italic text'
+        } else {
+          textarea.setSelectionRange(newEnd, newEnd);
+        }
+      }
+    }, 0);
+  };
 
   // Sync pasted job description when choosing a tracked job
   useEffect(() => {
@@ -396,13 +448,50 @@ export default function CoverLetterGenerator({
                 </div>
               </div>
 
+              {/* Format Toolbar */}
+              <div className="flex items-center gap-1 bg-slate-50 border border-slate-200/60 rounded-lg p-1.5 text-slate-600">
+                <button
+                  type="button"
+                  id="letter-format-bold"
+                  onClick={() => handleFormat('bold')}
+                  title="Bold"
+                  className="p-1.5 hover:bg-slate-200 rounded text-slate-700 cursor-pointer transition-colors"
+                >
+                  <Bold className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  id="letter-format-italic"
+                  onClick={() => handleFormat('italic')}
+                  title="Italic"
+                  className="p-1.5 hover:bg-slate-200 rounded text-slate-700 cursor-pointer transition-colors"
+                >
+                  <Italic className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  id="letter-format-bullet"
+                  onClick={() => handleFormat('bullet')}
+                  title="Bullet List"
+                  className="p-1.5 hover:bg-slate-200 rounded text-slate-700 cursor-pointer transition-colors"
+                >
+                  <List className="h-4 w-4" />
+                </button>
+                <div className="w-[1px] h-4 bg-slate-200 mx-1" />
+                <span className="text-[10px] text-slate-400 font-medium px-1 select-none">
+                  Select text and apply formatting
+                </span>
+              </div>
+
               {/* Editable body text */}
-              <div className="flex-1 min-h-[350px]">
+              <div className="flex-1 min-h-[350px] border border-slate-100 rounded-lg p-3 focus-within:border-indigo-500 transition-colors">
                 <textarea
                   id="letter-body-draft-textarea"
+                  ref={textareaRef}
                   value={generatedLetter}
                   onChange={(e) => setGeneratedLetter(e.target.value)}
                   className="w-full h-full min-h-[350px] border-0 focus:outline-none focus:ring-0 text-xs text-slate-700 leading-relaxed font-sans resize-none"
+                  placeholder="Start composing or edit the generated draft here..."
                 />
               </div>
             </motion.div>

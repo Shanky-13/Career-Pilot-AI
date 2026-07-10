@@ -61,7 +61,7 @@ const ResumeSchema = {
         website: { type: Type.STRING },
         summary: { type: Type.STRING }
       },
-      required: ["fullName", "email", "phone"]
+      required: ["fullName"]
     },
     experience: {
       type: Type.ARRAY,
@@ -79,7 +79,7 @@ const ResumeSchema = {
             items: { type: Type.STRING }
           }
         },
-        required: ["company", "position", "startDate"]
+        required: ["company"]
       }
     },
     education: {
@@ -95,7 +95,7 @@ const ResumeSchema = {
           endDate: { type: Type.STRING },
           current: { type: Type.BOOLEAN }
         },
-        required: ["institution", "degree"]
+        required: ["institution"]
       }
     },
     skills: {
@@ -131,8 +131,61 @@ const ResumeSchema = {
       }
     }
   },
-  required: ["personalInfo", "experience", "education", "skills", "projects", "certifications"]
+  required: ["personalInfo"]
 };
+
+// Helper function to deep fill missing properties of extracted resume JSON to ensure stable runtime
+function fillMissingResumeFields(parsed: any): any {
+  const result = {
+    personalInfo: {
+      fullName: parsed?.personalInfo?.fullName || "Professional Candidate",
+      email: parsed?.personalInfo?.email || "",
+      phone: parsed?.personalInfo?.phone || "",
+      location: parsed?.personalInfo?.location || "",
+      website: parsed?.personalInfo?.website || "",
+      summary: parsed?.personalInfo?.summary || ""
+    },
+    experience: Array.isArray(parsed?.experience)
+      ? parsed.experience.map((exp: any) => ({
+          company: exp?.company || "",
+          position: exp?.position || "",
+          location: exp?.location || "",
+          startDate: exp?.startDate || "",
+          endDate: exp?.endDate || "",
+          current: typeof exp?.current === "boolean" ? exp.current : false,
+          description: Array.isArray(exp?.description) ? exp.description : []
+        }))
+      : [],
+    education: Array.isArray(parsed?.education)
+      ? parsed.education.map((edu: any) => ({
+          institution: edu?.institution || "",
+          degree: edu?.degree || "",
+          fieldOfStudy: edu?.fieldOfStudy || "",
+          location: edu?.location || "",
+          startDate: edu?.startDate || "",
+          endDate: edu?.endDate || "",
+          current: typeof edu?.current === "boolean" ? edu.current : false
+        }))
+      : [],
+    skills: Array.isArray(parsed?.skills) ? parsed.skills.filter((s: any) => typeof s === "string") : [],
+    projects: Array.isArray(parsed?.projects)
+      ? parsed.projects.map((proj: any) => ({
+          name: proj?.name || "",
+          role: proj?.role || "",
+          description: Array.isArray(proj?.description) ? proj.description : [],
+          url: proj?.url || ""
+        }))
+      : [],
+    certifications: Array.isArray(parsed?.certifications)
+      ? parsed.certifications.map((cert: any) => ({
+          name: cert?.name || "",
+          issuer: cert?.issuer || "",
+          date: cert?.date || ""
+        }))
+      : []
+  };
+  return result;
+}
 
 // ---------------------------------------------------------
 // 2. ATS Checker Schema
@@ -220,7 +273,14 @@ app.post("/api/resume/import", async (req, res) => {
       }
     });
 
-    res.json(JSON.parse(response.text || "{}"));
+    let parsed = {};
+    try {
+      parsed = JSON.parse(response.text || "{}");
+    } catch (parseErr) {
+      console.error("Failed to parse Gemini JSON:", response.text);
+    }
+    const robustData = fillMissingResumeFields(parsed);
+    res.json(robustData);
   } catch (error: any) {
     console.error("Error in /api/resume/import:", error);
     res.status(500).json({ error: error.message || "Failed to parse resume." });
@@ -262,7 +322,14 @@ ${text}`
       }
     });
 
-    res.json(JSON.parse(response.text || "{}"));
+    let parsed = {};
+    try {
+      parsed = JSON.parse(response.text || "{}");
+    } catch (parseErr) {
+      console.error("Failed to parse Gemini LinkedIn JSON:", response.text);
+    }
+    const robustData = fillMissingResumeFields(parsed);
+    res.json(robustData);
   } catch (error: any) {
     console.error("Error in /api/resume/import-linkedin:", error);
     res.status(500).json({ error: error.message || "Failed to parse LinkedIn profile." });
