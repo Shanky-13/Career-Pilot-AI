@@ -187,6 +187,44 @@ function fillMissingResumeFields(parsed: any): any {
   return result;
 }
 
+// Robust JSON parsing utility with clear logging and markdown cleanup
+function cleanAndParseJSON(rawText: string | undefined): any {
+  if (!rawText) return {};
+  
+  const trimmed = rawText.trim();
+  try {
+    return JSON.parse(trimmed);
+  } catch (err: any) {
+    console.warn(`[Gemini JSON Parse] Standard JSON.parse failed (${err.message}). Attempting cleanup...`);
+    console.log(`[Gemini Raw Response Debug]:\n${trimmed}\n[End Raw Response]`);
+    
+    // Strip markdown JSON block if present: ```json ... ``` or ``` ... ```
+    let cleaned = trimmed;
+    if (cleaned.startsWith("```")) {
+      cleaned = cleaned.replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/, "");
+    }
+    
+    try {
+      return JSON.parse(cleaned.trim());
+    } catch (err2: any) {
+      console.error("[Gemini JSON Parse] Failed to parse cleaned JSON. Error:", err2.message);
+      // Attempt substring extraction to find outermost braces
+      const startIdx = cleaned.indexOf("{");
+      const endIdx = cleaned.lastIndexOf("}");
+      if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+        try {
+          const extracted = cleaned.substring(startIdx, endIdx + 1);
+          console.log("[Gemini JSON Parse] Successfully extracted braced substring:", extracted.substring(0, 50) + "...");
+          return JSON.parse(extracted);
+        } catch (err3: any) {
+          console.error("[Gemini JSON Parse] Brace substring extraction parse failed too:", err3.message);
+        }
+      }
+      throw new Error(`Invalid structured JSON response from AI. Raw response: ${trimmed.substring(0, 100)}...`);
+    }
+  }
+}
+
 // ---------------------------------------------------------
 // 2. ATS Checker Schema
 // ---------------------------------------------------------
@@ -237,28 +275,32 @@ const JobMatchSchema = {
 app.post("/api/resume/import", async (req, res) => {
   try {
     const { fileData, fileType, text } = req.body;
-    let contents: any[] = [];
+    let contents: any = null;
 
     if (fileType === "application/pdf" && fileData) {
       // Remove data url prefix if present
       const base64Data = fileData.replace(/^data:application\/pdf;base64,/, "");
-      contents = [
-        {
-          inlineData: {
-            mimeType: "application/pdf",
-            data: base64Data
+      contents = {
+        parts: [
+          {
+            inlineData: {
+              mimeType: "application/pdf",
+              data: base64Data
+            }
+          },
+          {
+            text: "Extract all structured information from this resume PDF. Populate the schema fully. If some sections like certifications are not present, return an empty array for them rather than omitting them. Ensure all names, experiences, education, and skills are extracted completely."
           }
-        },
-        {
-          text: "Extract all structured information from this resume PDF. Populate the schema fully. If some sections like certifications are not present, return an empty array for them rather than omitting them. Ensure all names, experiences, education, and skills are extracted completely."
-        }
-      ];
+        ]
+      };
     } else if (text) {
-      contents = [
-        {
-          text: `Extract all structured information from the following resume text and format it precisely into the schema. Ensure all fields are populated as accurately as possible:\n\n${text}`
-        }
-      ];
+      contents = {
+        parts: [
+          {
+            text: `Extract all structured information from the following resume text and format it precisely into the schema. Ensure all fields are populated as accurately as possible:\n\n${text}`
+          }
+        ]
+      };
     } else {
       res.status(400).json({ error: "Missing resume data. Provide fileData (PDF base64) or plain text." });
       return;
@@ -273,12 +315,7 @@ app.post("/api/resume/import", async (req, res) => {
       }
     });
 
-    let parsed = {};
-    try {
-      parsed = JSON.parse(response.text || "{}");
-    } catch (parseErr) {
-      console.error("Failed to parse Gemini JSON:", response.text);
-    }
+    const parsed = cleanAndParseJSON(response.text);
     const robustData = fillMissingResumeFields(parsed);
     res.json(robustData);
   } catch (error: any) {
@@ -296,9 +333,10 @@ app.post("/api/resume/import-linkedin", async (req, res) => {
       return;
     }
 
-    const contents = [
-      {
-        text: `Analyze the following LinkedIn profile text copy-paste. Extract all structured information and format it precisely into the schema.
+    const contents = {
+      parts: [
+        {
+          text: `Analyze the following LinkedIn profile text copy-paste. Extract all structured information and format it precisely into the schema.
 Extract:
 - Name, contact details, summary (from About or top section).
 - Work Experience (company, position, startDate, endDate, description as bullet points).
@@ -310,8 +348,9 @@ Ensure all fields are fully populated with high-fidelity, complete extraction. I
 
 LinkedIn Profile Text:
 ${text}`
-      }
-    ];
+        }
+      ]
+    };
 
     const response = await generateContentWithFallback({
       contents,
@@ -322,12 +361,7 @@ ${text}`
       }
     });
 
-    let parsed = {};
-    try {
-      parsed = JSON.parse(response.text || "{}");
-    } catch (parseErr) {
-      console.error("Failed to parse Gemini LinkedIn JSON:", response.text);
-    }
+    const parsed = cleanAndParseJSON(response.text);
     const robustData = fillMissingResumeFields(parsed);
     res.json(robustData);
   } catch (error: any) {
@@ -363,7 +397,7 @@ ${resumeText}`;
       }
     });
 
-    res.json(JSON.parse(response.text || "{}"));
+    res.json(cleanAndParseJSON(response.text));
   } catch (error: any) {
     console.error("Error in /api/ats/check:", error);
     res.status(500).json({ error: error.message || "Failed to perform ATS check." });
@@ -398,7 +432,7 @@ Original Bullet:
       }
     });
 
-    res.json(JSON.parse(response.text || "{}"));
+    res.json(cleanAndParseJSON(response.text));
   } catch (error: any) {
     console.error("Error in /api/resume/optimize:", error);
     res.status(500).json({ error: error.message || "Failed to optimize bullet." });
@@ -468,7 +502,7 @@ ${resumeText}`;
       }
     });
 
-    res.json(JSON.parse(response.text || "{}"));
+    res.json(cleanAndParseJSON(response.text));
   } catch (error: any) {
     console.error("Error in /api/job/match:", error);
     res.status(500).json({ error: error.message || "Failed to perform Job Match analysis." });
