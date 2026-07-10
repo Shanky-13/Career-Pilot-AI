@@ -11,8 +11,19 @@ import {
   TrendingUp,
   Award,
   CheckCircle2,
-  Bookmark
+  Bookmark,
+  Calendar,
+  Percent
 } from 'lucide-react';
+import {
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip
+} from 'recharts';
 import { Resume, JobApplication } from '../types';
 
 interface DashboardProps {
@@ -21,6 +32,25 @@ interface DashboardProps {
   setActiveTab: (tab: string) => void;
   latestATSScore: number | null;
 }
+
+// Custom Tooltip for the Recharts visualization
+const CustomTooltip = ({ active, payload }: any) => {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload;
+    return (
+      <div className="bg-slate-900 border border-slate-800 p-3 rounded-lg shadow-xl text-xs space-y-1">
+        <p className="font-bold text-slate-200">{data.date}</p>
+        <p className="font-semibold text-indigo-400">Success Rate: {payload[0].value}%</p>
+        {data.total !== undefined && data.total > 0 && (
+          <p className="text-[10px] text-slate-400 font-mono">
+            Interviews/Offers: {data.success} of {data.total}
+          </p>
+        )}
+      </div>
+    );
+  }
+  return null;
+};
 
 export default function Dashboard({
   resumes,
@@ -39,6 +69,61 @@ export default function Dashboard({
     Offer: applications.filter(a => a.stage === 'Offer').length,
     Rejected: applications.filter(a => a.stage === 'Rejected').length,
   };
+
+  // Generate historical success rate trend
+  const getChartData = () => {
+    // Filter out 'Saved' stage as they represent drafts (not submitted/applied yet)
+    const activeApps = applications.filter(a => a.stage !== 'Saved');
+    
+    if (activeApps.length === 0) {
+      // Return beautiful demo trend to instruct/inspire the user if no applied applications exist yet
+      return [
+        { date: 'Week 1', rate: 15, total: 2, success: 0 },
+        { date: 'Week 2', rate: 30, total: 4, success: 1 },
+        { date: 'Week 3', rate: 45, total: 6, success: 2 },
+        { date: 'Week 4', rate: 55, total: 8, success: 4 },
+        { date: 'Week 5', rate: 68, total: 10, success: 6 },
+      ];
+    }
+
+    // Sort active apps chronologically by updatedAt
+    const sortedApps = [...activeApps].sort(
+      (a, b) => new Date(a.updatedAt || 0).getTime() - new Date(b.updatedAt || 0).getTime()
+    );
+
+    const dataPoints: { date: string; rate: number; total: number; success: number }[] = [];
+
+    // Accumulate chronologically
+    for (let i = 0; i < sortedApps.length; i++) {
+      const dateObj = new Date(sortedApps[i].updatedAt || Date.now());
+      const dateStr = dateObj.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      
+      const slice = sortedApps.slice(0, i + 1);
+      const total = slice.length;
+      const success = slice.filter(a => a.stage === 'Interview' || a.stage === 'Offer').length;
+      const rate = Math.round((success / total) * 100);
+
+      // Group by date so we only have one trend point per day
+      if (dataPoints.length > 0 && dataPoints[dataPoints.length - 1].date === dateStr) {
+        dataPoints[dataPoints.length - 1] = { date: dateStr, rate, total, success };
+      } else {
+        dataPoints.push({ date: dateStr, rate, total, success });
+      }
+    }
+
+    // If there is only 1 data point, prepend a 0% baseline point so Recharts can draw a smooth line
+    if (dataPoints.length === 1) {
+      return [
+        { date: 'Start', rate: 0, total: 0, success: 0 },
+        ...dataPoints
+      ];
+    }
+
+    return dataPoints;
+  };
+
+  const chartData = getChartData();
+  const hasRealData = applications.filter(a => a.stage !== 'Saved').length > 0;
 
   const quickActions = [
     {
@@ -182,35 +267,112 @@ export default function Dashboard({
 
       {/* Main Column Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Quick Actions Panel - Left 2 Columns */}
-        <div className="lg:col-span-2 space-y-4">
-          <h2 className="font-sans text-lg font-bold text-slate-900">Quick Actions</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {quickActions.map((action, idx) => {
-              const Icon = action.icon;
-              return (
-                <motion.button
-                  key={action.title}
-                  id={`dashboard-qa-${action.tab}`}
-                  onClick={() => setActiveTab(action.tab)}
-                  whileHover={{ y: -3, transition: { duration: 0.1 } }}
-                  className="flex items-start text-left p-4 bg-white border border-slate-200 rounded-xl hover:shadow-md transition-shadow group cursor-pointer"
-                >
-                  <div className={`p-3 rounded-xl text-white ${action.color} mr-4`}>
-                    <Icon className="h-5 w-5" />
-                  </div>
-                  <div className="flex-1 min-w-0 pr-2">
-                    <h3 className="font-semibold text-sm text-slate-900 flex items-center gap-1.5">
-                      {action.title}
-                      <ArrowRight className="h-3.5 w-3.5 text-slate-400 opacity-0 group-hover:opacity-100 group-hover:translate-x-1 transition-all" />
-                    </h3>
-                    <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                      {action.description}
-                    </p>
-                  </div>
-                </motion.button>
-              );
-            })}
+        {/* Main Column - Left 2 Columns */}
+        <div className="lg:col-span-2 space-y-8">
+          {/* Pipeline Success Rate Chart */}
+          <motion.div
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, delay: 0.15 }}
+            className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4"
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-4">
+              <div>
+                <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+                  <TrendingUp className="h-4 w-4 text-indigo-600" />
+                  Application Success Rate Over Time
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Cumulative conversion of tracked applications progressing to Interview or Offer stage.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`text-[10px] font-bold px-2 py-1 rounded-md ${
+                  hasRealData ? 'bg-indigo-50 text-indigo-700' : 'bg-slate-100 text-slate-600'
+                }`}>
+                  {hasRealData ? 'Live Insights' : 'Sample Trend'}
+                </span>
+              </div>
+            </div>
+
+            {/* Recharts Area Chart */}
+            <div className="h-64 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="colorRate" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.2}/>
+                      <stop offset="95%" stopColor="#4f46e5" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis
+                    dataKey="date"
+                    stroke="#94a3b8"
+                    fontSize={10}
+                    tickLine={false}
+                    axisLine={false}
+                  />
+                  <YAxis
+                    stroke="#94a3b8"
+                    fontSize={10}
+                    tickLine={false}
+                    axisLine={false}
+                    domain={[0, 100]}
+                    tickFormatter={(v) => `${v}%`}
+                  />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Area
+                    type="monotone"
+                    dataKey="rate"
+                    stroke="#4f46e5"
+                    strokeWidth={2}
+                    fillOpacity={1}
+                    fill="url(#colorRate)"
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+
+            {!hasRealData && (
+              <div className="bg-slate-50 border border-slate-100 rounded-lg p-3 text-center">
+                <p className="text-[11px] text-slate-500">
+                  💡 <strong>No active applied applications yet!</strong> Showed a sample baseline. Drag job cards to <strong>Applied</strong>, <strong>Interview</strong>, or <strong>Offer</strong> stages in your <button onClick={() => setActiveTab('job-tracker')} className="text-indigo-600 font-bold hover:underline cursor-pointer">Job Tracker</button> to construct your live conversion funnel.
+                </p>
+              </div>
+            )}
+          </motion.div>
+
+          {/* Quick Actions Panel */}
+          <div className="space-y-4">
+            <h2 className="font-sans text-lg font-bold text-slate-900">Quick Actions</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {quickActions.map((action, idx) => {
+                const Icon = action.icon;
+                return (
+                  <motion.button
+                    key={action.title}
+                    id={`dashboard-qa-${action.tab}`}
+                    onClick={() => setActiveTab(action.tab)}
+                    whileHover={{ y: -3, transition: { duration: 0.1 } }}
+                    className="flex items-start text-left p-4 bg-white border border-slate-200 rounded-xl hover:shadow-md transition-shadow group cursor-pointer"
+                  >
+                    <div className={`p-3 rounded-xl text-white ${action.color} mr-4`}>
+                      <Icon className="h-5 w-5" />
+                    </div>
+                    <div className="flex-1 min-w-0 pr-2">
+                      <h3 className="font-semibold text-sm text-slate-900 flex items-center gap-1.5">
+                        {action.title}
+                        <ArrowRight className="h-3.5 w-3.5 text-slate-400 opacity-0 group-hover:opacity-100 group-hover:translate-x-1 transition-all" />
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                        {action.description}
+                      </p>
+                    </div>
+                  </motion.button>
+                );
+              })}
+            </div>
           </div>
         </div>
 
