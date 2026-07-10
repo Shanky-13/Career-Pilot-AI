@@ -21,7 +21,9 @@ import {
   User as UserIcon,
   AlertCircle,
   RefreshCw,
-  Chrome
+  Chrome,
+  Sun,
+  Moon
 } from 'lucide-react';
 
 // Sub components
@@ -55,6 +57,25 @@ export default function App() {
   const [selectedResumeId, setSelectedResumeId] = useState<string | null>(null);
   const [latestATSScore, setLatestATSScore] = useState<number | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
+
+  const [darkMode, setDarkMode] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('theme');
+      if (saved) return saved === 'dark';
+      return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('theme', 'light');
+    }
+  }, [darkMode]);
 
   // Track user login status
   useEffect(() => {
@@ -195,9 +216,9 @@ export default function App() {
   // Show beautiful loading screen during Firebase bootstrap
   if (authLoading) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50">
+      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 dark:bg-[#0b0f19] text-slate-700 dark:text-slate-300 transition-colors">
         <RefreshCw className="h-10 w-10 text-indigo-600 animate-spin mb-4" />
-        <p className="text-xs font-bold text-slate-700 uppercase tracking-widest font-sans">Bootstrapping CareerPilot AI...</p>
+        <p className="text-xs font-bold uppercase tracking-widest font-sans">Bootstrapping CareerPilot AI...</p>
       </div>
     );
   }
@@ -205,15 +226,26 @@ export default function App() {
   // Render Authentication Screen if not signed in
   if (!user) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
-        <div className="max-w-md w-full bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden p-8 space-y-6">
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-[#0b0f19] p-4 relative transition-colors">
+        {/* Float Dark Mode Toggle */}
+        <div className="absolute top-4 right-4">
+          <button
+            onClick={() => setDarkMode(!darkMode)}
+            className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 shadow-sm hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer transition-colors"
+            title="Toggle theme"
+          >
+            {darkMode ? <Sun className="h-4 w-4 text-amber-500" /> : <Moon className="h-4 w-4 text-slate-600" />}
+          </button>
+        </div>
+
+        <div className="max-w-md w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 rounded-2xl shadow-xl overflow-hidden p-8 space-y-6">
           {/* Logo Brand */}
           <div className="flex flex-col items-center text-center space-y-2">
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-md shadow-indigo-600/20">
               <Sparkles className="h-6 w-6" />
             </div>
-            <h1 className="font-sans text-2xl font-black text-slate-900 tracking-tight">CareerPilot AI</h1>
-            <p className="text-xs text-slate-500 max-w-xs leading-normal">
+            <h1 className="font-sans text-2xl font-black text-slate-900 dark:text-white tracking-tight">CareerPilot AI</h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xs leading-normal">
               An offline-first career-coaching hub for resumes, cover letters, and live ATS keyword scans.
             </p>
           </div>
@@ -222,16 +254,16 @@ export default function App() {
           <form onSubmit={handleEmailAuth} className="space-y-4">
             {isSignUp && (
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Full Name</label>
+                <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Full Name</label>
                 <div className="relative">
-                  <UserIcon className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                  <UserIcon className="absolute left-3 top-2.5 h-4 w-4 text-slate-400 dark:text-slate-500" />
                   <input
                     id="auth-fullname"
                     type="text"
                     required
                     value={displayName}
                     onChange={(e) => setDisplayName(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2 rounded-lg border border-slate-200 text-xs text-slate-800 focus:border-indigo-500 focus:outline-none"
+                    className="w-full pl-9 pr-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
                     placeholder="Jane Doe"
                   />
                 </div>
@@ -239,39 +271,39 @@ export default function App() {
             )}
 
             <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Email Address</label>
+              <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Email Address</label>
               <div className="relative">
-                <Mail className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                <Mail className="absolute left-3 top-2.5 h-4 w-4 text-slate-400 dark:text-slate-500" />
                 <input
                   id="auth-email"
                   type="email"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 rounded-lg border border-slate-200 text-xs text-slate-800 focus:border-indigo-500 focus:outline-none"
+                  className="w-full pl-9 pr-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
                   placeholder="jane.doe@example.com"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Password</label>
+              <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Password</label>
               <div className="relative">
-                <Lock className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                <Lock className="absolute left-3 top-2.5 h-4 w-4 text-slate-400 dark:text-slate-500" />
                 <input
                   id="auth-password"
                   type="password"
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 rounded-lg border border-slate-200 text-xs text-slate-800 focus:border-indigo-500 focus:outline-none"
+                  className="w-full pl-9 pr-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
                   placeholder="••••••••"
                 />
               </div>
             </div>
 
             {authError && (
-              <div className="flex items-start gap-2 text-xs text-red-600 bg-red-50 p-3 rounded-lg border border-red-100 leading-normal">
+              <div className="flex items-start gap-2 text-xs text-red-600 bg-red-50 dark:bg-red-950/10 p-3 rounded-lg border border-red-100 dark:border-red-900/30 leading-normal">
                 <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
                 <span>{authError}</span>
               </div>
@@ -280,24 +312,24 @@ export default function App() {
             <button
               id="auth-submit-btn"
               type="submit"
-              className="w-full py-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition-colors cursor-pointer"
+              className="w-full py-2.5 rounded-lg bg-slate-900 dark:bg-indigo-600 hover:bg-slate-800 dark:hover:bg-indigo-700 text-white font-bold text-xs transition-colors cursor-pointer"
             >
               {isSignUp ? 'Register My Profile' : 'Sign In'}
             </button>
           </form>
 
           {/* Social login divider */}
-          <div className="flex items-center justify-between text-xs text-slate-400">
-            <span className="h-px bg-slate-200 flex-1"></span>
+          <div className="flex items-center justify-between text-xs text-slate-400 dark:text-slate-500">
+            <span className="h-px bg-slate-200 dark:bg-slate-800 flex-1"></span>
             <span className="px-3 font-semibold uppercase tracking-wider text-[10px]">Or Continue With</span>
-            <span className="h-px bg-slate-200 flex-1"></span>
+            <span className="h-px bg-slate-200 dark:bg-slate-800 flex-1"></span>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <button
               id="auth-google-btn"
               onClick={handleGoogleSignIn}
-              className="flex items-center justify-center gap-2 border border-slate-200 bg-white hover:bg-slate-50 py-2 rounded-lg text-xs font-bold text-slate-700 cursor-pointer"
+              className="flex items-center justify-center gap-2 border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 py-2 rounded-lg text-xs font-bold text-slate-700 dark:text-slate-300 cursor-pointer transition-colors"
             >
               <Chrome className="h-4 w-4 text-red-500" />
               Google
@@ -306,20 +338,20 @@ export default function App() {
             <button
               id="auth-guest-btn"
               onClick={handleGuestLogin}
-              className="flex items-center justify-center gap-2 border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 py-2 rounded-lg text-xs font-bold text-indigo-800 cursor-pointer"
+              className="flex items-center justify-center gap-2 border border-indigo-200 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/30 hover:bg-indigo-100 dark:hover:bg-indigo-950/50 py-2 rounded-lg text-xs font-bold text-indigo-800 dark:text-indigo-300 cursor-pointer transition-colors"
             >
-              <Sparkles className="h-4 w-4 text-indigo-600" />
+              <Sparkles className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
               Guest Entry
             </button>
           </div>
 
           {/* Selector Switcher */}
-          <p className="text-center text-xs text-slate-500">
+          <p className="text-center text-xs text-slate-500 dark:text-slate-400">
             {isSignUp ? 'Already have an account?' : 'New to CareerPilot?'}
             <button
               id="auth-toggle-btn"
               onClick={() => { setIsSignUp(!isSignUp); setAuthError(null); }}
-              className="text-indigo-600 font-bold ml-1.5 hover:underline cursor-pointer"
+              className="text-indigo-600 dark:text-indigo-400 font-bold ml-1.5 hover:underline cursor-pointer"
             >
               {isSignUp ? 'Sign In' : 'Create an Account'}
             </button>
@@ -331,7 +363,7 @@ export default function App() {
 
   // Signed In - Main layout container
   return (
-    <div className="min-h-screen bg-slate-50 pl-64 text-slate-800">
+    <div className="min-h-screen bg-slate-50 dark:bg-[#0b0f19] pl-64 text-slate-800 dark:text-slate-100 transition-colors">
       {/* Persistent Sidebar */}
       <Sidebar
         activeTab={activeTab}
@@ -340,6 +372,8 @@ export default function App() {
         onSignOut={handleSignOut}
         isChatOpen={isChatOpen}
         setIsChatOpen={setIsChatOpen}
+        darkMode={darkMode}
+        setDarkMode={setDarkMode}
       />
 
       {/* Main Tab Panel Content Area */}
@@ -357,6 +391,8 @@ export default function App() {
                 applications={applications}
                 setActiveTab={setActiveTab}
                 latestATSScore={latestATSScore}
+                setSelectedResumeId={setSelectedResumeId}
+                onRefresh={handleRefresh}
               />
             )}
 

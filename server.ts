@@ -189,40 +189,69 @@ function fillMissingResumeFields(parsed: any): any {
 
 // Robust JSON parsing utility with clear logging and markdown cleanup
 function cleanAndParseJSON(rawText: string | undefined): any {
-  if (!rawText) return {};
+  if (!rawText) {
+    console.warn("[cleanAndParseJSON] Warning: rawText is undefined or empty.");
+    return {};
+  }
   
   const trimmed = rawText.trim();
   try {
     return JSON.parse(trimmed);
   } catch (err: any) {
-    console.warn(`[Gemini JSON Parse] Standard JSON.parse failed (${err.message}). Attempting cleanup...`);
-    console.log(`[Gemini Raw Response Debug]:\n${trimmed}\n[End Raw Response]`);
+    console.warn(`[Gemini JSON Parse] Standard JSON.parse failed (${err.message}). Attempting robust cleanup...`);
+    console.log(`[Gemini Raw Response Debug Log]:\n${trimmed}\n[End Raw Response Debug Log]`);
     
     // Strip markdown JSON block if present: ```json ... ``` or ``` ... ```
     let cleaned = trimmed;
     if (cleaned.startsWith("```")) {
-      cleaned = cleaned.replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/, "");
+      cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
     }
+    cleaned = cleaned.trim();
     
     try {
-      return JSON.parse(cleaned.trim());
+      return JSON.parse(cleaned);
     } catch (err2: any) {
-      console.error("[Gemini JSON Parse] Failed to parse cleaned JSON. Error:", err2.message);
+      console.error("[Gemini JSON Parse] Cleaned JSON parse failed. Error:", err2.message);
+      
       // Attempt substring extraction to find outermost braces
       const startIdx = cleaned.indexOf("{");
       const endIdx = cleaned.lastIndexOf("}");
       if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
         try {
           const extracted = cleaned.substring(startIdx, endIdx + 1);
-          console.log("[Gemini JSON Parse] Successfully extracted braced substring:", extracted.substring(0, 50) + "...");
+          console.log("[Gemini JSON Parse] Attempting parse on extracted braced substring:", extracted.substring(0, 50) + "...");
           return JSON.parse(extracted);
         } catch (err3: any) {
           console.error("[Gemini JSON Parse] Brace substring extraction parse failed too:", err3.message);
         }
       }
-      throw new Error(`Invalid structured JSON response from AI. Raw response: ${trimmed.substring(0, 100)}...`);
+
+      // Try regex cleanup of trailing commas (e.g. ,} or ,] ) and control characters
+      try {
+        const regexCleaned = cleaned
+          .replace(/,\s*([\]}])/g, "$1") // remove trailing commas before close brackets/braces
+          .replace(/[\u0000-\u001F\u007F-\u009F]/g, ""); // remove control characters
+        
+        console.log("[Gemini JSON Parse] Attempting parse on regex-cleaned JSON...");
+        return JSON.parse(regexCleaned.trim());
+      } catch (err4: any) {
+        console.error("[Gemini JSON Parse] Regex-cleaned parse failed too:", err4.message);
+      }
+      
+      throw new Error(`Invalid structured JSON response from AI. Error: ${err2.message}. Raw response: ${trimmed.substring(0, 200)}...`);
     }
   }
+}
+
+// Helper function to deep fill missing properties of ATS check JSON to ensure stable runtime
+function fillMissingATSFields(parsed: any): any {
+  return {
+    overallScore: typeof parsed?.overallScore === "number" ? parsed.overallScore : 70,
+    matchedKeywords: Array.isArray(parsed?.matchedKeywords) ? parsed.matchedKeywords.filter((k: any) => typeof k === "string") : [],
+    missingKeywords: Array.isArray(parsed?.missingKeywords) ? parsed.missingKeywords.filter((k: any) => typeof k === "string") : [],
+    formattingIssues: Array.isArray(parsed?.formattingIssues) ? parsed.formattingIssues.filter((i: any) => typeof i === "string") : [],
+    suggestions: Array.isArray(parsed?.suggestions) ? parsed.suggestions.filter((s: any) => typeof s === "string") : ["Review your resume alignment and keywords to customize further."]
+  };
 }
 
 // ---------------------------------------------------------
@@ -380,6 +409,8 @@ app.post("/api/ats/check", async (req, res) => {
       return;
     }
 
+    console.log(`[ATS Check] Request received. Resume length: ${resumeText.length}, Job description length: ${jobDescription.length}`);
+
     const promptText = `Analyze the following resume against the job description. Rate the alignment from 0 to 100, identify matched and missing keywords, check for any typical formatting/parsing issues, and provide actionable suggestions.
 
 Job Description:
@@ -388,16 +419,37 @@ ${jobDescription}
 Resume:
 ${resumeText}`;
 
-    const response = await generateContentWithFallback({
-      contents: promptText,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: ATSCheckSchema,
-        temperature: 0.2,
-      }
-    });
+    let responseText: string | undefined;
+    try {
+      const response = await generateContentWithFallback({
+        contents: {
+          parts: [
+            { text: promptText }
+          ]
+        },
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: ATSCheckSchema,
+          temperature: 0.2,
+        }
+      });
+      responseText = response.text;
+    } catch (modelErr: any) {
+      console.error("[ATS Check] Gemini content generation failed:", modelErr);
+      throw new Error(`Gemini model generation failed: ${modelErr.message || modelErr}`);
+    }
 
-    res.json(cleanAndParseJSON(response.text));
+    let parsed: any;
+    try {
+      parsed = cleanAndParseJSON(responseText);
+    } catch (parseErr: any) {
+      console.error("[ATS Check] Failed to parse Gemini response as JSON:", parseErr);
+      console.log(`[ATS Check] Raw response causing failure:\n${responseText}\n[End Raw Response]`);
+      throw new Error(`ATS Alignment Parse Error: ${parseErr.message}`);
+    }
+
+    const robustData = fillMissingATSFields(parsed);
+    res.json(robustData);
   } catch (error: any) {
     console.error("Error in /api/ats/check:", error);
     res.status(500).json({ error: error.message || "Failed to perform ATS check." });
@@ -424,7 +476,11 @@ Original Bullet:
     }
 
     const response = await generateContentWithFallback({
-      contents: promptText,
+      contents: {
+        parts: [
+          { text: promptText }
+        ]
+      },
       config: {
         responseMimeType: "application/json",
         responseSchema: ResumeOptimizeSchema,
@@ -462,7 +518,11 @@ Resume:
 ${resumeText}`;
 
     const response = await generateContentWithFallback({
-      contents: promptText,
+      contents: {
+        parts: [
+          { text: promptText }
+        ]
+      },
       config: {
         temperature: 0.4,
       }
@@ -494,7 +554,11 @@ Resume:
 ${resumeText}`;
 
     const response = await generateContentWithFallback({
-      contents: promptText,
+      contents: {
+        parts: [
+          { text: promptText }
+        ]
+      },
       config: {
         responseMimeType: "application/json",
         responseSchema: JobMatchSchema,

@@ -14,12 +14,16 @@ import {
   GraduationCap,
   Sparkles,
   ClipboardList,
-  Compass
+  Compass,
+  Maximize2,
+  AlertCircle
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { Resume, ResumeData, Experience, Education, Project, Certification } from '../types';
 import { db } from '../lib/firebase';
 import { collection, addDoc, updateDoc, doc, deleteDoc } from 'firebase/firestore';
+import ResumePreviewModal from './ResumePreviewModal';
+import PDFPreviewer from './PDFPreviewer';
 
 interface ResumeBuilderProps {
   resumes: Resume[];
@@ -58,6 +62,9 @@ export default function ResumeBuilder({
   const [resumeData, setResumeData] = useState<ResumeData>(emptyResumeData());
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Load selected resume or default
   useEffect(() => {
@@ -300,16 +307,18 @@ export default function ResumeBuilder({
   // Delete Resume
   const handleDeleteResume = async () => {
     if (!selectedResumeId) return;
-    if (!window.confirm("Are you sure you want to delete this resume?")) return;
-
+    setIsDeleting(true);
     try {
       await deleteDoc(doc(db, 'resumes', selectedResumeId));
       setSelectedResumeId(null);
       setResumeData(emptyResumeData());
+      setShowDeleteConfirm(false);
       await onRefresh();
     } catch (err) {
       console.error("Error deleting resume:", err);
-      alert("Failed to delete resume.");
+      alert("Failed to delete resume. Please try again.");
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -588,7 +597,7 @@ export default function ResumeBuilder({
           {selectedResumeId && (
             <button
               id="resume-delete-btn"
-              onClick={handleDeleteResume}
+              onClick={() => setShowDeleteConfirm(true)}
               className="flex items-center justify-center p-2 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
               title="Delete Resume"
             >
@@ -1174,289 +1183,58 @@ export default function ResumeBuilder({
         </div>
 
         {/* Live Preview Panel */}
-        <div className="bg-slate-100 rounded-xl p-4 flex flex-col h-full min-h-[500px]">
-          {/* Preview Panel Controls */}
-          <div className="flex items-center justify-between border-b border-slate-200 pb-3 mb-4">
-            <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-              <Eye className="h-4 w-4 text-indigo-600" />
-              Live Resume Preview
-            </span>
-            <div className="flex gap-1 bg-white p-1 rounded-lg border border-slate-200/80">
+        <PDFPreviewer
+          resumeData={resumeData}
+          resumeTitle={resumeTitle}
+          templateType={templateType}
+          setTemplateType={setTemplateType}
+          onFullscreenOpen={() => setIsPreviewModalOpen(true)}
+        />
+      </div>
+
+      {/* Fullscreen Document Preview Overlay Component */}
+      <ResumePreviewModal
+        isOpen={isPreviewModalOpen}
+        onClose={() => setIsPreviewModalOpen(false)}
+        resumeData={resumeData}
+        resumeTitle={resumeTitle}
+      />
+
+      {/* Resume Deletion Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 dark:bg-black/70 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full shadow-2xl p-6 relative">
+            <div className="flex items-start gap-4">
+              <div className="h-10 w-10 rounded-full bg-red-100 dark:bg-red-950/40 flex items-center justify-center text-red-600 dark:text-red-400 shrink-0">
+                <AlertCircle className="h-5.5 w-5.5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">Delete Resume Profile?</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 leading-relaxed">
+                  Are you sure you want to permanently delete <span className="font-bold text-slate-800 dark:text-slate-200">"{resumeTitle}"</span>? This action cannot be undone, and you will lose any associated configurations.
+                </p>
+              </div>
+            </div>
+            
+            <div className="flex items-center justify-end gap-3 mt-6 pt-4 border-t border-slate-100 dark:border-slate-800">
               <button
-                id="template-btn-ats"
-                onClick={() => setTemplateType('ats')}
-                className={`px-3 py-1 text-[10px] font-bold rounded-md transition-colors cursor-pointer ${
-                  templateType === 'ats'
-                    ? 'bg-indigo-500 text-white'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={isDeleting}
+                className="px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors disabled:opacity-50 cursor-pointer"
               >
-                Plain ATS Safe
+                Cancel
               </button>
               <button
-                id="template-btn-modern"
-                onClick={() => setTemplateType('modern')}
-                className={`px-3 py-1 text-[10px] font-bold rounded-md transition-colors cursor-pointer ${
-                  templateType === 'modern'
-                    ? 'bg-indigo-500 text-white'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
+                onClick={handleDeleteResume}
+                disabled={isDeleting}
+                className="px-4 py-2 rounded-lg bg-red-600 text-xs font-semibold text-white hover:bg-red-700 transition-colors disabled:opacity-50 flex items-center gap-2 cursor-pointer"
               >
-                Styled Modern
+                {isDeleting ? 'Deleting...' : 'Delete Permanently'}
               </button>
             </div>
           </div>
-
-          {/* Actual Render Canvas */}
-          <div className="flex-1 bg-white border border-slate-300 shadow-lg p-8 overflow-y-auto max-h-[700px] text-slate-800 text-xs">
-            {templateType === 'ats' ? (
-              /* Template 1: ATS Safe Plain Layout */
-              <div className="font-sans space-y-6">
-                {/* Header */}
-                <div className="text-center space-y-2 border-b border-slate-200 pb-4">
-                  <h2 className="text-xl font-bold tracking-tight text-black uppercase">{resumeData.personalInfo.fullName || 'Candidate Full Name'}</h2>
-                  <p className="text-[10px] text-slate-600 flex justify-center flex-wrap gap-2">
-                    {resumeData.personalInfo.email && <span>{resumeData.personalInfo.email}</span>}
-                    {resumeData.personalInfo.phone && <span>• {resumeData.personalInfo.phone}</span>}
-                    {resumeData.personalInfo.location && <span>• {resumeData.personalInfo.location}</span>}
-                    {resumeData.personalInfo.website && <span>• {resumeData.personalInfo.website}</span>}
-                  </p>
-                </div>
-
-                {/* Summary */}
-                {resumeData.personalInfo.summary && (
-                  <div className="space-y-1">
-                    <h3 className="font-bold border-b border-slate-400 text-black uppercase tracking-wider text-[11px]">Professional Summary</h3>
-                    <p className="text-slate-700 leading-normal text-[11px]">{resumeData.personalInfo.summary}</p>
-                  </div>
-                )}
-
-                {/* Experience */}
-                {resumeData.experience.length > 0 && (
-                  <div className="space-y-4">
-                    <h3 className="font-bold border-b border-slate-400 text-black uppercase tracking-wider text-[11px]">Work Experience</h3>
-                    {resumeData.experience.map((exp, idx) => (
-                      <div key={idx} className="space-y-1">
-                        <div className="flex justify-between font-bold text-black text-[11px]">
-                          <span>{exp.position || 'Position Name'}</span>
-                          <span>{exp.startDate || 'Start'} – {exp.current ? 'Present' : exp.endDate || 'End'}</span>
-                        </div>
-                        <div className="flex justify-between font-medium italic text-slate-700 text-[11px]">
-                          <span>{exp.company || 'Company'}{exp.location ? `, ${exp.location}` : ''}</span>
-                        </div>
-                        {exp.description && exp.description.length > 0 && (
-                          <ul className="list-disc pl-5 space-y-1 mt-1 text-slate-700 text-[11px]">
-                            {exp.description.map((bullet, bulletIdx) => (
-                              bullet && <li key={bulletIdx}>{bullet}</li>
-                            ))}
-                          </ul>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Projects */}
-                {resumeData.projects.length > 0 && (
-                  <div className="space-y-4">
-                    <h3 className="font-bold border-b border-slate-400 text-black uppercase tracking-wider text-[11px]">Projects</h3>
-                    {resumeData.projects.map((proj, idx) => (
-                      <div key={idx} className="space-y-1">
-                        <div className="flex justify-between font-bold text-black text-[11px]">
-                          <span>{proj.name || 'Project Name'} {proj.role ? `(${proj.role})` : ''}</span>
-                          {proj.url && <span className="text-slate-500 text-[10px]">{proj.url}</span>}
-                        </div>
-                        {proj.description && proj.description.length > 0 && (
-                          <ul className="list-disc pl-5 space-y-1 mt-1 text-slate-700 text-[11px]">
-                            {proj.description.map((bullet, bulletIdx) => (
-                              bullet && <li key={bulletIdx}>{bullet}</li>
-                            ))}
-                          </ul>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Education */}
-                {resumeData.education.length > 0 && (
-                  <div className="space-y-3">
-                    <h3 className="font-bold border-b border-slate-400 text-black uppercase tracking-wider text-[11px]">Education</h3>
-                    {resumeData.education.map((edu, idx) => (
-                      <div key={idx} className="space-y-1">
-                        <div className="flex justify-between font-bold text-black text-[11px]">
-                          <span>{edu.degree || 'Degree'} {edu.fieldOfStudy ? `in ${edu.fieldOfStudy}` : ''}</span>
-                          <span>{edu.startDate || 'Start'} – {edu.current ? 'Present' : edu.endDate || 'End'}</span>
-                        </div>
-                        <div className="flex justify-between italic text-slate-700 text-[11px]">
-                          <span>{edu.institution || 'University'}{edu.location ? `, ${edu.location}` : ''}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Skills */}
-                {resumeData.skills.length > 0 && (
-                  <div className="space-y-1">
-                    <h3 className="font-bold border-b border-slate-400 text-black uppercase tracking-wider text-[11px]">Skills</h3>
-                    <p className="text-slate-700 text-[11px] leading-relaxed">{resumeData.skills.join(', ')}</p>
-                  </div>
-                )}
-
-                {/* Certifications */}
-                {resumeData.certifications.length > 0 && (
-                  <div className="space-y-2">
-                    <h3 className="font-bold border-b border-slate-400 text-black uppercase tracking-wider text-[11px]">Certifications</h3>
-                    <div className="space-y-1">
-                      {resumeData.certifications.map((cert, idx) => (
-                        <div key={idx} className="flex justify-between text-slate-700 text-[11px]">
-                          <span className="font-semibold text-black">{cert.name}</span>
-                          <span>{cert.issuer && `${cert.issuer}`} {cert.date && `(${cert.date})`}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            ) : (
-              /* Template 2: Styled Modern Accent Layout */
-              <div className="font-sans space-y-6">
-                {/* Header */}
-                <div className="flex justify-between items-start border-l-4 border-indigo-500 pl-4 py-1">
-                  <div>
-                    <h2 className="text-2xl font-bold tracking-tight text-slate-900">{resumeData.personalInfo.fullName || 'Candidate Name'}</h2>
-                    <p className="text-indigo-600 font-semibold text-xs mt-0.5">Software Development Professional</p>
-                  </div>
-                  <div className="text-right text-[10px] text-slate-500 space-y-0.5 leading-tight">
-                    {resumeData.personalInfo.email && <p>{resumeData.personalInfo.email}</p>}
-                    {resumeData.personalInfo.phone && <p>{resumeData.personalInfo.phone}</p>}
-                    {resumeData.personalInfo.location && <p>{resumeData.personalInfo.location}</p>}
-                    {resumeData.personalInfo.website && <p className="text-indigo-600 font-medium">{resumeData.personalInfo.website}</p>}
-                  </div>
-                </div>
-
-                {/* Summary */}
-                {resumeData.personalInfo.summary && (
-                  <div className="space-y-1 bg-slate-50 p-3 rounded-lg border-l border-slate-200">
-                    <h3 className="font-bold text-slate-900 tracking-tight text-[11px]">Professional Bio</h3>
-                    <p className="text-slate-600 leading-relaxed text-[11px]">{resumeData.personalInfo.summary}</p>
-                  </div>
-                )}
-
-                {/* Left/Right Grid Column if content can fit, else clean stacked segments with elegant colored titles */}
-                <div className="space-y-6">
-                  {/* Experience */}
-                  {resumeData.experience.length > 0 && (
-                    <div className="space-y-3">
-                      <h3 className="font-bold text-indigo-700 border-b border-slate-100 pb-1 text-xs uppercase tracking-wider flex items-center gap-1.5">
-                        <span className="h-1.5 w-1.5 rounded-full bg-indigo-500"></span>
-                        Work History
-                      </h3>
-                      {resumeData.experience.map((exp, idx) => (
-                        <div key={idx} className="space-y-1">
-                          <div className="flex justify-between font-bold text-slate-900 text-[11px]">
-                            <span>{exp.position}</span>
-                            <span className="text-slate-500 text-[10px] font-normal">{exp.startDate} – {exp.current ? 'Present' : exp.endDate}</span>
-                          </div>
-                          <p className="text-indigo-600 font-medium text-[10px]">
-                            {exp.company}{exp.location ? ` | ${exp.location}` : ''}
-                          </p>
-                          {exp.description && exp.description.length > 0 && (
-                            <ul className="list-disc pl-4 space-y-0.5 mt-1 text-slate-600 text-[11px]">
-                              {exp.description.map((bullet, bulletIdx) => (
-                                bullet && <li key={bulletIdx}>{bullet}</li>
-                              ))}
-                            </ul>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Projects */}
-                  {resumeData.projects.length > 0 && (
-                    <div className="space-y-3">
-                      <h3 className="font-bold text-indigo-700 border-b border-slate-100 pb-1 text-xs uppercase tracking-wider flex items-center gap-1.5">
-                        <span className="h-1.5 w-1.5 rounded-full bg-indigo-500"></span>
-                        Key Initiatives
-                      </h3>
-                      {resumeData.projects.map((proj, idx) => (
-                        <div key={idx} className="space-y-1">
-                          <div className="flex justify-between font-bold text-slate-900 text-[11px]">
-                            <span>{proj.name} {proj.role ? `— ${proj.role}` : ''}</span>
-                            {proj.url && <span className="text-slate-400 font-normal text-[10px]">{proj.url}</span>}
-                          </div>
-                          {proj.description && proj.description.length > 0 && (
-                            <ul className="list-disc pl-4 space-y-0.5 mt-1 text-slate-600 text-[11px]">
-                              {proj.description.map((bullet, bulletIdx) => (
-                                bullet && <li key={bulletIdx}>{bullet}</li>
-                              ))}
-                            </ul>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Two column layouts for details at bottom */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* Education Left Column */}
-                    {resumeData.education.length > 0 && (
-                      <div className="space-y-2">
-                        <h3 className="font-bold text-indigo-700 border-b border-slate-100 pb-1 text-xs uppercase tracking-wider flex items-center gap-1.5">
-                          <span className="h-1.5 w-1.5 rounded-full bg-indigo-500"></span>
-                          Education
-                        </h3>
-                        {resumeData.education.map((edu, idx) => (
-                          <div key={idx} className="text-[11px] space-y-0.5">
-                            <p className="font-bold text-slate-800">{edu.degree}</p>
-                            <p className="text-slate-600">{edu.fieldOfStudy}</p>
-                            <p className="text-[10px] text-slate-500 italic">{edu.institution}{edu.startDate ? ` (${edu.startDate})` : ''}</p>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Skills & Certs Right Column */}
-                    <div className="space-y-3">
-                      {resumeData.skills.length > 0 && (
-                        <div className="space-y-1.5">
-                          <h4 className="font-bold text-indigo-700 border-b border-slate-100 pb-1 text-xs uppercase tracking-wider flex items-center gap-1.5">
-                            <span className="h-1.5 w-1.5 rounded-full bg-indigo-500"></span>
-                            Tech Expertise
-                          </h4>
-                          <div className="flex flex-wrap gap-1">
-                            {resumeData.skills.map((skill, idx) => (
-                              <span key={idx} className="bg-slate-100 text-slate-700 text-[9px] font-semibold px-2 py-0.5 rounded border border-slate-200/50">
-                                {skill}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {resumeData.certifications.length > 0 && (
-                        <div className="space-y-1">
-                          <h4 className="font-semibold text-slate-700 text-[10px] uppercase">Certifications</h4>
-                          <ul className="space-y-1 text-[10px] text-slate-600">
-                            {resumeData.certifications.map((cert, idx) => (
-                              <li key={idx} className="leading-tight">
-                                <span className="font-semibold text-slate-800">{cert.name}</span>
-                                {cert.issuer && ` — ${cert.issuer}`}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
