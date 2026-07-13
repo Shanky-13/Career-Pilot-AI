@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import {
   Briefcase,
@@ -16,20 +16,32 @@ import {
   ArrowLeft,
   X,
   PlusCircle,
-  Save
+  Save,
+  Sparkles,
+  Globe,
+  MapPin,
+  ExternalLink,
+  Check,
+  Search,
+  Loader2,
+  AlertCircle,
+  TrendingUp,
+  ShieldAlert
 } from 'lucide-react';
-import { JobApplication, JobStage } from '../types';
+import { JobApplication, JobStage, Resume } from '../types';
 import { db } from '../lib/firebase';
 import { collection, addDoc, updateDoc, doc, deleteDoc } from 'firebase/firestore';
 
 interface JobTrackerProps {
   applications: JobApplication[];
+  resumes?: Resume[];
   userUid: string;
   onRefresh: () => Promise<void>;
 }
 
 export default function JobTracker({
   applications,
+  resumes = [],
   userUid,
   onRefresh
 }: JobTrackerProps) {
@@ -44,6 +56,138 @@ export default function JobTracker({
   const [notes, setNotes] = useState('');
   const [keyDates, setKeyDates] = useState('');
   const [stage, setStage] = useState<JobStage>('Saved');
+
+  // Apify Job Search Modal and Form State
+  const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
+  const [searchRole, setSearchRole] = useState('Software Engineer');
+  const [searchLocation, setSearchLocation] = useState('Remote');
+  const [customRole, setCustomRole] = useState('');
+  const [customLocation, setCustomLocation] = useState('');
+  const [selectedSearchResumeId, setSelectedSearchResumeId] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [searchResults, setSearchResults] = useState<any | null>(null);
+  const [savedJobKeys, setSavedJobKeys] = useState<string[]>([]); // Track saved jobs locally: "Company-Title"
+
+  useEffect(() => {
+    if (resumes.length > 0 && !selectedSearchResumeId) {
+      setSelectedSearchResumeId(resumes[0].id);
+    }
+  }, [resumes, selectedSearchResumeId]);
+
+  // Helper to compile resume into clean string for ATS / Search
+  const compileResumeText = (resume: Resume): string => {
+    const d = resume.data;
+    const p = d.personalInfo;
+    let text = `${p.fullName}\n${p.email} | ${p.phone} | ${p.location}\n${p.website}\n\nSUMMARY:\n${p.summary}\n\n`;
+
+    text += `EXPERIENCE:\n`;
+    d.experience.forEach(exp => {
+      text += `${exp.position} at ${exp.company} (${exp.startDate} - ${exp.current ? 'Present' : exp.endDate}) Location: ${exp.location}\n`;
+      exp.description.forEach(b => {
+        if (b) text += `- ${b}\n`;
+      });
+    });
+
+    text += `\nPROJECTS:\n`;
+    d.projects.forEach(proj => {
+      text += `${proj.name} — ${proj.role} (${proj.url})\n`;
+      proj.description.forEach(b => {
+        if (b) text += `- ${b}\n`;
+      });
+    });
+
+    text += `\nEDUCATION:\n`;
+    d.education.forEach(edu => {
+      text += `${edu.degree} in ${edu.fieldOfStudy} from ${edu.institution} (${edu.startDate} - ${edu.current ? 'Present' : edu.endDate}) Location: ${edu.location}\n`;
+    });
+
+    text += `\nSKILLS:\n${d.skills.join(', ')}\n\n`;
+
+    text += `CERTIFICATIONS:\n`;
+    d.certifications.forEach(cert => {
+      text += `${cert.name} by ${cert.issuer} (${cert.date})\n`;
+    });
+
+    return text;
+  };
+
+  const handleApifySearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSearchError(null);
+    setSearchResults(null);
+
+    const roleToSearch = searchRole === 'Custom' ? customRole.trim() : searchRole;
+    const locationToSearch = searchLocation === 'Custom' ? customLocation.trim() : searchLocation;
+
+    if (!roleToSearch) {
+      setSearchError('Please specify a role preference.');
+      return;
+    }
+    if (!locationToSearch) {
+      setSearchError('Please specify a location preference.');
+      return;
+    }
+
+    const selectedResume = resumes.find(r => r.id === selectedSearchResumeId);
+    if (!selectedResume) {
+      setSearchError('Please select a resume version to ground the job search.');
+      return;
+    }
+
+    setIsSearching(true);
+    try {
+      const resumeText = compileResumeText(selectedResume);
+      const response = await fetch('/api/job/apify-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          resumeText,
+          dreamRole: roleToSearch,
+          targetLocation: locationToSearch
+        })
+      });
+
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || 'Failed to search jobs from live web.');
+      }
+
+      const data = await response.json();
+      setSearchResults(data);
+    } catch (err: any) {
+      console.error(err);
+      setSearchError(err.message || 'An error occurred while fetching jobs.');
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleSaveApifyJob = async (job: any) => {
+    try {
+      const description = `Why this fits: ${job.whyThisFitsMe}\n\nExperience Match: ${job.experienceMatchSummary}\n\nSkills: ${job.keySkillsMatch}\n\nLink: ${job.applicationLink}`;
+      
+      await addDoc(collection(db, 'jobApplications'), {
+        ownerId: userUid,
+        company: job.company,
+        role: job.jobTitle,
+        description,
+        salary: job.compensationInsight || 'N/A',
+        notes: `Priority: ${job.priorityLevel}. Easy Apply: ${job.easyApply}. Company Tier: ${job.companyTier}. Notes/Concerns: ${job.notesConcerns}`,
+        keyDates: `Discovered on ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`,
+        stage: 'Saved',
+        updatedAt: new Date().toISOString()
+      });
+
+      const jobKey = `${job.company}-${job.jobTitle}`;
+      setSavedJobKeys(prev => [...prev, jobKey]);
+
+      await onRefresh();
+    } catch (err) {
+      console.error("Error saving job from search:", err);
+      alert("Failed to save the job to your application tracker.");
+    }
+  };
 
   const columns: { id: JobStage; name: string; color: string; badge: string }[] = [
     { id: 'Saved', name: 'Saved', color: 'border-t-slate-400 bg-slate-50 text-slate-700', badge: 'bg-slate-200 text-slate-800' },
@@ -172,13 +316,22 @@ export default function JobTracker({
           <h1 className="font-sans text-2xl font-bold tracking-tight text-slate-900">Job Application Tracker</h1>
           <p className="text-sm text-slate-500 mt-1">Track pipeline progress, deadlines, salary, and notes across stages.</p>
         </div>
-        <button
-          id="kanban-add-job-btn"
-          onClick={() => setIsAddOpen(true)}
-          className="flex items-center gap-2 rounded-lg bg-slate-900 hover:bg-slate-800 px-4 py-2 text-xs font-bold text-white transition-colors cursor-pointer self-start md:self-auto"
-        >
-          <Plus className="h-4 w-4" /> Add Tracked Job
-        </button>
+        <div className="flex flex-wrap gap-2.5 self-start md:self-auto">
+          <button
+            id="kanban-discover-jobs-btn"
+            onClick={() => setIsSearchModalOpen(true)}
+            className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 px-4 py-2 text-xs font-bold text-white transition-all cursor-pointer shadow-sm shadow-indigo-500/10 hover:shadow-indigo-500/20"
+          >
+            <Sparkles className="h-4 w-4 animate-pulse" /> AI Job Discovery
+          </button>
+          <button
+            id="kanban-add-job-btn"
+            onClick={() => setIsAddOpen(true)}
+            className="flex items-center gap-2 rounded-lg bg-slate-900 hover:bg-slate-800 px-4 py-2 text-xs font-bold text-white transition-colors cursor-pointer"
+          >
+            <Plus className="h-4 w-4" /> Add Tracked Job
+          </button>
+        </div>
       </div>
 
       {/* Kanban Board Grid */}
@@ -554,6 +707,417 @@ export default function JobTracker({
                 </button>
               </div>
             </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* AI Job Discovery Modal */}
+      {isSearchModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 dark:bg-black/80 backdrop-blur-sm overflow-y-auto">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-6xl w-full p-6 shadow-2xl flex flex-col my-8 max-h-[90vh] overflow-hidden"
+          >
+            {/* Modal Header */}
+            <div className="flex justify-between items-start border-b border-slate-100 dark:border-slate-800 pb-4">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Sparkles className="h-5 w-5 text-indigo-600 dark:text-indigo-400 font-bold" />
+                  Live AI Job Discovery Engine
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  Connect your resume profile to scrape and match real-time vacancies powered by web grounding algorithms.
+                </p>
+              </div>
+              <button
+                id="modal-search-close"
+                onClick={() => {
+                  setIsSearchModalOpen(false);
+                  setSearchResults(null);
+                  setSearchError(null);
+                }}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Modal Content - Scrollable container */}
+            <div className="flex-1 overflow-y-auto py-5 space-y-6 pr-1">
+              {/* Preferences Form Card */}
+              <form onSubmit={handleApifySearch} className="bg-slate-50 dark:bg-slate-850/50 rounded-xl p-4 border border-slate-150 dark:border-slate-800 space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* Selector: Resume */}
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">Select Profile Grounding *</label>
+                    {resumes.length === 0 ? (
+                      <div className="text-xs text-amber-600 dark:text-amber-400 font-semibold p-2 border border-dashed border-amber-200 dark:border-amber-900/30 rounded-lg bg-amber-50/20">
+                        No resumes found. Please create or import one first.
+                      </div>
+                    ) : (
+                      <select
+                        id="search-resume-select"
+                        value={selectedSearchResumeId}
+                        onChange={(e) => setSelectedSearchResumeId(e.target.value)}
+                        className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs text-slate-850 dark:text-slate-100 focus:border-indigo-500 focus:outline-none transition-all cursor-pointer font-medium"
+                      >
+                        {resumes.map(r => (
+                          <option key={r.id} value={r.id}>{r.title}</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+
+                  {/* Selector: Role */}
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">Target Engineering Role *</label>
+                    <select
+                      id="search-role-select"
+                      value={searchRole}
+                      onChange={(e) => {
+                        setSearchRole(e.target.value);
+                        if (e.target.value !== 'Custom') setCustomRole('');
+                      }}
+                      className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs text-slate-850 dark:text-slate-100 focus:border-indigo-500 focus:outline-none transition-all cursor-pointer font-medium"
+                    >
+                      <option value="Software Engineer">Software Engineer</option>
+                      <option value="Full Stack Engineer">Full Stack Engineer</option>
+                      <option value="Frontend Engineer">Frontend Engineer</option>
+                      <option value="Backend Engineer">Backend Engineer</option>
+                      <option value="Mobile Engineer">Mobile Engineer</option>
+                      <option value="Product Manager">Product Manager</option>
+                      <option value="Data Scientist / AI Engineer">Data Scientist & AI Engineer</option>
+                      <option value="Custom">Custom Role...</option>
+                    </select>
+                  </div>
+
+                  {/* Selector: Location */}
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">Geographic Location *</label>
+                    <select
+                      id="search-location-select"
+                      value={searchLocation}
+                      onChange={(e) => {
+                        setSearchLocation(e.target.value);
+                        if (e.target.value !== 'Custom') setCustomLocation('');
+                      }}
+                      className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs text-slate-850 dark:text-slate-100 focus:border-indigo-500 focus:outline-none transition-all cursor-pointer font-medium"
+                    >
+                      <option value="Remote">Remote</option>
+                      <option value="Remote only">Remote only (Global)</option>
+                      <option value="US">United States</option>
+                      <option value="Europe">Europe</option>
+                      <option value="India">India</option>
+                      <option value="Bengaluru">Bengaluru</option>
+                      <option value="San Francisco">San Francisco</option>
+                      <option value="London">London</option>
+                      <option value="Custom">Custom Location...</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Conditional Custom Inputs */}
+                {(searchRole === 'Custom' || searchLocation === 'Custom') && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1 animate-fade-in">
+                    {searchRole === 'Custom' && (
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1">Specify Custom Role</label>
+                        <input
+                          id="search-role-custom"
+                          type="text"
+                          required
+                          value={customRole}
+                          onChange={(e) => setCustomRole(e.target.value)}
+                          className="w-full rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2 text-xs text-slate-800 dark:text-slate-100 bg-white dark:bg-slate-800 focus:border-indigo-500 focus:outline-none transition-all"
+                          placeholder="e.g. Senior Staff DevOps Engineer"
+                        />
+                      </div>
+                    )}
+                    {searchLocation === 'Custom' && (
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1">Specify Custom Location</label>
+                        <input
+                          id="search-location-custom"
+                          type="text"
+                          required
+                          value={customLocation}
+                          onChange={(e) => setCustomLocation(e.target.value)}
+                          className="w-full rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2 text-xs text-slate-800 dark:text-slate-100 bg-white dark:bg-slate-800 focus:border-indigo-500 focus:outline-none transition-all"
+                          placeholder="e.g. New York, NY"
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Trigger Action */}
+                <div className="flex justify-end pt-1">
+                  <button
+                    id="search-submit-btn"
+                    type="submit"
+                    disabled={isSearching || resumes.length === 0}
+                    className="flex items-center gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:hover:bg-indigo-600 px-6 py-2.5 text-xs font-bold text-white transition-all cursor-pointer shadow-md shadow-indigo-600/10"
+                  >
+                    {isSearching ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Scraping Live Web...
+                      </>
+                    ) : (
+                      <>
+                        <Search className="h-4 w-4" />
+                        Initiate Scrape & Grounding Match
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+
+              {/* Main Modal Display Area */}
+              {isSearching && (
+                <div className="h-64 border border-slate-100 dark:border-slate-800 rounded-2xl flex flex-col items-center justify-center text-center p-6 bg-slate-50/50 dark:bg-slate-900/40 animate-pulse">
+                  <Loader2 className="h-8 w-8 text-indigo-600 animate-spin mb-4" />
+                  <p className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-widest">Querying Google Search Grounding Index...</p>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-2 max-w-sm leading-relaxed">
+                    This retrieves active, verified hiring portals from FAANG, tier-1 tech startups, and matching roles, then ranks them based on your profile keywords.
+                  </p>
+                </div>
+              )}
+
+              {searchError && (
+                <div className="flex items-start gap-3 text-xs text-red-600 bg-red-50 dark:bg-red-950/10 p-4 rounded-xl border border-red-100 dark:border-red-900/30 leading-relaxed">
+                  <AlertCircle className="h-5 w-5 shrink-0 mt-0.5 text-red-500" />
+                  <div className="space-y-1">
+                    <p className="font-bold text-red-700">Scraping Interrupted</p>
+                    <p className="text-[11px] text-slate-600 dark:text-slate-400">{searchError}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Display Search Results */}
+              {searchResults && (
+                <div className="space-y-6 animate-fade-in">
+                  {/* High Level Market Intelligence Card */}
+                  <div className="bg-gradient-to-br from-indigo-50/50 to-indigo-100/10 dark:from-indigo-950/10 dark:to-indigo-900/5 border border-indigo-100 dark:border-indigo-900/40 rounded-2xl p-5 space-y-4">
+                    <div className="flex items-center gap-2">
+                      <TrendingUp className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+                      <h3 className="font-sans text-xs font-bold uppercase tracking-wider text-indigo-900 dark:text-indigo-300">Grounding Insights & Market Fit</h3>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                      <div className="space-y-2">
+                        <p className="text-slate-500 dark:text-slate-400 font-medium">Best Fit Direction:</p>
+                        <p className="text-slate-800 dark:text-slate-200 font-semibold text-sm leading-snug">{searchResults.bestFitEngineeringDirection || 'Senior Engineering & Architecture Paths'}</p>
+                      </div>
+                      <div className="space-y-2">
+                        <p className="text-slate-500 dark:text-slate-400 font-medium">Hiring Profile Insight:</p>
+                        <p className="text-slate-800 dark:text-slate-200 italic leading-relaxed">{searchResults.undersellingOrOverreachInsight || 'Hiring volume is currently high in product management and backend distributed services.'}</p>
+                      </div>
+                    </div>
+
+                    {/* Tags block */}
+                    <div className="flex flex-wrap gap-4 pt-2 border-t border-indigo-100/40 dark:border-indigo-900/20 text-xs">
+                      <div className="space-y-1.5 flex-1 min-w-[200px]">
+                        <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide block">Strongest Marketable Skills:</span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {searchResults.strongestMarketableSkills?.map((skill: string, i: number) => (
+                            <span key={i} className="text-[10px] font-semibold bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 px-2 py-0.5 rounded-full">
+                              {skill}
+                            </span>
+                          )) || <span className="text-[10px] text-slate-400 italic">None analyzed</span>}
+                        </div>
+                      </div>
+                      <div className="space-y-1.5 flex-1 min-w-[200px]">
+                        <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide block">Discovered Career Niches:</span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {searchResults.hiddenNiches?.map((n: string, i: number) => (
+                            <span key={i} className="text-[10px] font-semibold bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded-full">
+                              {n}
+                            </span>
+                          )) || <span className="text-[10px] text-slate-400 italic">None analyzed</span>}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Scraped Jobs Table */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Matching Vacancies Table</h3>
+                      <span className="text-[10px] font-bold text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">
+                        {searchResults.jobs?.length || 0} Openings Located
+                      </span>
+                    </div>
+
+                    <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-xl bg-white dark:bg-slate-900">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-slate-50 dark:bg-slate-850/50 border-b border-slate-200 dark:border-slate-800 text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                            <th className="py-3 px-4">Role & Company</th>
+                            <th className="py-3 px-4">Location & Type</th>
+                            <th className="py-3 px-4">Match Alignment</th>
+                            <th className="py-3 px-4">Compensation & Stats</th>
+                            <th className="py-3 px-4 text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-150 dark:divide-slate-800 text-xs">
+                          {searchResults.jobs?.map((job: any, index: number) => {
+                            const isSaved = savedJobKeys.includes(`${job.company}-${job.jobTitle}`) || 
+                              applications.some(app => app.company.toLowerCase() === job.company.toLowerCase() && app.role.toLowerCase() === job.jobTitle.toLowerCase());
+                            
+                            // Check if this job is indexed in strongest/safest/stretch lists
+                            const isStrongest = searchResults.top5Strongest?.includes(index);
+                            const isSafest = searchResults.top5Safest?.includes(index);
+                            const isStretch = searchResults.top5Stretch?.includes(index);
+
+                            return (
+                              <tr key={index} className="hover:bg-slate-50/40 dark:hover:bg-slate-850/30 transition-colors">
+                                <td className="py-4 px-4 max-w-xs">
+                                  <div className="space-y-1">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="font-extrabold text-slate-900 dark:text-white leading-tight">{job.jobTitle}</span>
+                                      {isStrongest && <span className="bg-violet-100 dark:bg-violet-950/50 text-violet-700 dark:text-violet-300 text-[9px] font-bold px-1.5 py-0.2 rounded">Match Leader</span>}
+                                      {isSafest && <span className="bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 text-[9px] font-bold px-1.5 py-0.2 rounded">Safe Fit</span>}
+                                      {isStretch && <span className="bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 text-[9px] font-bold px-1.5 py-0.2 rounded">Stretch</span>}
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">{job.company}</span>
+                                      <span className={`text-[9px] font-semibold px-1.5 py-0.2 rounded ${
+                                        job.companyTier === 'FAANG' ? 'bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300' :
+                                        job.companyTier === 'Top Product' ? 'bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300' :
+                                        job.companyTier === 'Strong Startup' ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300' :
+                                        'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                                      }`}>
+                                        {job.companyTier}
+                                      </span>
+                                    </div>
+                                    <p className="text-[10px] text-slate-400 dark:text-slate-500 line-clamp-2 leading-relaxed">{job.whyThisFitsMe}</p>
+                                  </div>
+                                </td>
+
+                                <td className="py-4 px-4">
+                                  <div className="space-y-1 text-[11px]">
+                                    <div className="flex items-center gap-1.5 text-slate-700 dark:text-slate-300">
+                                      <MapPin className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                                      <span className="font-semibold">{job.location}</span>
+                                    </div>
+                                    <div className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
+                                      <Globe className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                                      <span>{job.workType}</span>
+                                    </div>
+                                  </div>
+                                </td>
+
+                                <td className="py-4 px-4">
+                                  <div className="space-y-1.5">
+                                    <div className="flex items-center gap-2">
+                                      <span className={`text-xs font-black ${
+                                        job.matchScore >= 85 ? 'text-emerald-600 dark:text-emerald-400' :
+                                        job.matchScore >= 70 ? 'text-amber-600 dark:text-amber-400' :
+                                        'text-slate-500'
+                                      }`}>
+                                        {job.matchScore}% Fit
+                                      </span>
+                                      <div className="w-16 bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden shrink-0">
+                                        <div 
+                                          className={`h-full rounded-full ${
+                                            job.matchScore >= 85 ? 'bg-emerald-500' :
+                                            job.matchScore >= 70 ? 'bg-amber-500' :
+                                            'bg-slate-400'
+                                          }`}
+                                          style={{ width: `${job.matchScore}%` }}
+                                        />
+                                      </div>
+                                    </div>
+                                    <p className="text-[10px] text-slate-400 dark:text-slate-500 max-w-[180px] truncate" title={job.experienceMatchSummary}>
+                                      {job.experienceMatchSummary}
+                                    </p>
+                                  </div>
+                                </td>
+
+                                <td className="py-4 px-4">
+                                  <div className="space-y-1.5 text-[11px]">
+                                    <div className="flex items-center gap-1 text-slate-700 dark:text-slate-300">
+                                      <DollarSign className="h-3.5 w-3.5 text-slate-400" />
+                                      <span className="font-bold">{job.compensationInsight || 'N/A'}</span>
+                                    </div>
+                                    <div className="flex gap-1.5 items-center">
+                                      <span className="text-[10px] text-slate-400">Easy Apply: <span className="font-bold text-slate-600 dark:text-slate-300">{job.easyApply}</span></span>
+                                      <span className={`text-[9px] font-black uppercase px-1 py-0.2 rounded ${
+                                        job.priorityLevel === 'High' ? 'bg-rose-50 text-rose-600 dark:bg-rose-950/20 dark:text-rose-400' : 'bg-slate-50 text-slate-500 dark:bg-slate-800'
+                                      }`}>
+                                        {job.priorityLevel}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </td>
+
+                                <td className="py-4 px-4 text-right">
+                                  <div className="flex items-center justify-end gap-2.5">
+                                    <a
+                                      href={job.applicationLink}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-50 dark:hover:bg-slate-850 flex items-center gap-1 cursor-pointer transition-colors"
+                                      title="Open original job posting"
+                                    >
+                                      <ExternalLink className="h-3.5 w-3.5" />
+                                      <span className="text-[10px] font-bold">Apply</span>
+                                    </a>
+
+                                    <button
+                                      onClick={() => handleSaveApifyJob(job)}
+                                      disabled={isSaved}
+                                      className={`flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-bold cursor-pointer transition-all ${
+                                        isSaved 
+                                          ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed'
+                                          : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm shadow-indigo-600/10'
+                                      }`}
+                                    >
+                                      {isSaved ? (
+                                        <>
+                                          <Check className="h-3.5 w-3.5 text-slate-400 dark:text-slate-500" />
+                                          Saved
+                                        </>
+                                      ) : (
+                                        <>
+                                          <PlusCircle className="h-3.5 w-3.5" />
+                                          Save
+                                        </>
+                                      )}
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="border-t border-slate-100 dark:border-slate-800 pt-4 flex justify-between items-center text-[10px] text-slate-400">
+              <span className="flex items-center gap-1.5">
+                <ShieldAlert className="h-4 w-4 text-indigo-500" />
+                Live web scraping powered by Google Search Grounding & Gemini models.
+              </span>
+              <button
+                id="modal-search-close-btn"
+                onClick={() => {
+                  setIsSearchModalOpen(false);
+                  setSearchResults(null);
+                  setSearchError(null);
+                }}
+                className="px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200 transition-colors cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
           </motion.div>
         </div>
       )}

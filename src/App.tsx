@@ -440,6 +440,7 @@ export default function App() {
             {activeTab === 'job-tracker' && (
               <JobTracker
                 applications={applications}
+                resumes={resumes}
                 userUid={user.uid}
                 onRefresh={handleRefresh}
               />
@@ -449,6 +450,8 @@ export default function App() {
               <JobMatch
                 resumes={resumes}
                 applications={applications}
+                userUid={user.uid}
+                onRefresh={handleRefresh}
               />
             )}
           </div>
